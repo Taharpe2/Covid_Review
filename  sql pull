@@ -1,0 +1,224 @@
+/*  Creating and querying a database to get varying insights based on COVID-19 data. 
+Data dated up to 10-6-21 https://ourworldindata.org/covid-deaths
+PostgresSQL Version 14, GUI PGADMIN4
+
+
+*/
+
+
+-- Creating Multitude of tables 
+
+CREATE TABLE VACC (
+ iso_code Varchar(255),
+ continent Varchar(255),
+ location Varchar(255),
+ population BIGINT,
+ date DATE,
+ new_tests NUMERIC,
+ total_tests NUMERIC,
+ total_tests_per_thousand NUMERIC,
+ new_tests_per_thousand NUMERIC,
+ new_tests_smoothed NUMERIC,
+ new_tests_smoothed_per_thousand NUMERIC,
+ positive_rate NUMERIC,
+ tests_per_case NUMERIC,
+ tests_units varchar(255),
+ total_vaccinations NUMERIC,
+ people_vaccinated NUMERIC,
+ people_fully_vaccinated NUMERIC,
+ total_boosters NUMERIC,
+ new_vaccinations NUMERIC,
+ new_vaccinations_smoothed NUMERIC,
+ total_vaccinations_per_hundred NUMERIC,
+ people_vaccinated_per_hundred NUMERIC,
+ people_fully_vaccinated_per_hundred NUMERIC,
+ total_boosters_per_hundred NUMERIC,
+ new_vaccinations_smoothed_per_million NUMERIC,
+ stringency_index NUMERIC,
+ population_density NUMERIC,
+ median_age NUMERIC,
+ aged_65_older NUMERIC,
+ aged_70_older NUMERIC,
+ gdp_per_capita NUMERIC,
+ extreme_poverty NUMERIC,
+ cardiovasc_death_rate NUMERIC,
+ diabetes_prevalence NUMERIC,
+ female_smokers NUMERIC,
+ male_smokers NUMERIC,
+ handwashing_facilities NUMERIC,
+ hospital_beds_per_thousand NUMERIC,
+ life_expectancy NUMERIC,
+ human_development_index NUMERIC,
+ excess_mortality_cumulative_absolute NUMERIC,
+ excess_mortality_cumulative NUMERIC,
+ excess_mortality NUMERIC,
+ excess_mortality_cumulative_per_million NUMERIC
+);
+
+
+CREATE TABLE Deaths(
+iso_code Varchar(255),
+continent Varchar(255),
+location Varchar(255),
+population BIGINT,
+date DATE,
+total_cases NUMERIC,
+new_cases NUMERIC,
+new_cases_smoothed NUMERIC,
+total_deaths NUMERIC,
+new_deaths NUMERIC,
+new_deaths_smoothed NUMERIC,
+total_cases_per_million NUMERIC,
+new_cases_per_million NUMERIC,
+new_cases_smoothed_per_million NUMERIC,
+total_deaths_per_million NUMERIC,
+new_deaths_per_million NUMERIC,
+new_deaths_smoothed_per_million NUMERIC,
+reproduction_rate NUMERIC,
+icu_patients NUMERIC,
+icu_patients_per_million NUMERIC,
+hosp_patients NUMERIC,
+hosp_patients_per_million NUMERIC,
+weekly_icu_admissions NUMERIC,
+weekly_icu_admissions_per_million NUMERIC,
+weekly_hosp_admissions NUMERIC,
+weekly_hosp_admissions_per_million NUMERIC
+);
+
+--Utitilized import/export features in PGADMIN4 to import CSV Data
+
+--Test both tables to verify that data has been properly added to tables
+
+
+
+SELECT * FROM VACC
+LIMIT 5;
+
+
+SELECT * FROM DEATHS
+LIMIT 5;
+
+
+
+
+select location, date, total_cases,New_cases,total_deaths, population
+from deaths
+order by 1,2;
+
+/* Looking into Death Percentage in United States. 
+Sort by most recent to see current rate */
+
+
+select location , date, total_cases,total_deaths, round((total_deaths/total_cases)*100,2) as Mortality_Rate
+from deaths
+where location = 'United States'
+order by date desc;
+
+
+--Looking at total cases vs population.
+-- Shows what % of Population had covid on a daily basis
+
+Select location, date, total_cases ,population, round(total_cases/population,2) as Cases
+	from deaths	
+	where location = 'United States'
+	order by date desc;		
+	
+--Which country had the highest peak of cases per population
+--Countries in which we do not have complete data has been removed 
+	
+Select location , population, 	max(total_cases) as HighestInfCount , round(max((total_cases/population))*100,2) as PercentPopInfected
+from deaths
+where total_cases is not null and population is not null and continent is not null
+group by location, population
+order by round(max((total_cases/population))*100,2) desc;
+
+
+-- Showing countries with Highest Death Count per population
+--some countries do not have data so that is 
+
+Select  location , max(total_deaths) as TotalDeathCount
+from deaths
+where total_deaths is not null
+and
+continent is not null
+group by location 
+order by max(total_deaths) desc ;
+
+select  continent, max(total_deaths) as TotalDeathCount
+from deaths
+where total_deaths is not null
+and
+continent is not null
+group by continent
+order by max(total_deaths) desc ;
+
+-- Where are we on a global level? 
+
+select date, sum(new_cases) as total_cases , sum(new_deaths) as total_deaths, round(sum(new_deaths)/sum(new_cases)*100,2) as MortalityRate
+from deaths 
+where continent is not null
+group by date
+order by date desc ;
+
+--total Population vs Vaccinations
+--% Of population that has received at least 1 vaccine
+
+select deaths.continent , deaths.location, deaths.date, deaths.population, vacc.new_vaccinations
+--sum(vacc.new_vaccinations) -- over (Partition by deaths.Location Order by deaths.location, deaths.Date) as RollingPeopleVaccinated),
+
+from deaths
+join vacc
+	on deaths.location = vacc.location
+	and deaths.date = vacc.date
+	where deaths.continent is not null
+
+
+
+-- Use CTE to having to help create a column that shows a rolling % of the population that is vaccinated
+
+With PopulationVsVaccination  (Continent,Location, Date, Population , new_vaccinations, RollingVaccinationNumber)
+AS
+(
+select deaths.continent , deaths.location, deaths.date, deaths.population, vacc.new_vaccinations,
+sum(vacc.new_vaccinations) OVER (Partition by deaths.location order by deaths.location, deaths.date)
+as RollingVaccinationNumber
+
+from deaths
+join vacc
+	on deaths.location = vacc.location
+	and deaths.date = vacc.date
+	where deaths.continent is not null
+	)
+	Select *, round((RollingVaccinationNumber/population)*100,2)  from PopulationVsVaccination
+	;
+	 
+-- Above exmaple in a show  CTE. It have me a great look at the data and upon further investigation I discovered two things
+--ew_vaccinations column is strictly new shots given. Since there are a multitude of vaccines. 2 shots vs 1 shot and differing times between partially and fully vaccinated.
+-- I do not have enough information to accurately guess the true numbers of fully vaccinated counts. Luckily a dive into more columns I found a already produced rolling daily list of fully vaccinated numbers.
+--some days have null values due to reporting authorities being closed on those days. That data gets rolled into the next business day	 
+	 
+--Find current FUlly Vaccinated rate. Using Subqueries to base Where function off most recent date.	 
+	 
+	 
+	 select location, round(people_fully_vaccinated/population*100,2) as  vacc 
+	 from vacc
+	 where people_fully_vaccinated is not null
+	 and date = (select max(date) from vacc)
+	 order by vacc desc
+	 ;
+	 
+
+-- View to use for data visualization connections. 
+Create View CurrentVaccinatedPop as
+ select location, round(people_fully_vaccinated/population*100,2) as  vacc 
+	 from vacc
+	 where people_fully_vaccinated is not null
+	 and date = (select max(date) from vacc)
+	 order by vacc desc
+	 ;
+	 
+	 
+	 select * from CurrentVaccinatedPop;
+	 
+
+	 
